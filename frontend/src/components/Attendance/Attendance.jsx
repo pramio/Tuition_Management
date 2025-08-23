@@ -15,9 +15,9 @@ export default function Attendance() {
   const pollRef = useRef(null);
   const canFetch = useMemo(() => Boolean(batchId && date), [batchId, date]);
 
-  // Load batches
+  // Load batches (with no-cache to force fresh data)
   useEffect(() => {
-    api.get('/batches')
+    api.get('/batches', { cache: 'no-cache' })
       .then(({ data }) => setBatches(data || []))
       .catch(() => toastError('Failed to load batches'));
   }, []);
@@ -46,13 +46,19 @@ export default function Attendance() {
       });
       const map = {};
       (data || []).forEach((rec) => {
-        const sid = typeof rec.student === 'object' ? rec.student._id : rec.student;
+        // Defensive: skip if student is null or _id is missing
+        if (!rec.student || !rec.student._id) {
+          console.warn('Skipping attendance record with missing student:', rec);
+          return;
+        }
+        const sid = rec.student._id;
         map[sid] = { status: rec.status, forgotBook: !!rec.forgotBook, fine: rec.fine };
       });
       setAttendanceData(map);
     } catch (e) {
+      console.error('Frontend fetch error:', e); // Added for debugging
       toastError('Failed to fetch attendance');
-      setAttendanceData({});
+      // Do not wipe attendanceData here to prevent loss of optimistic updates
     } finally {
       setLoading(false);
     }
@@ -78,6 +84,17 @@ export default function Attendance() {
   const mark = async (studentId, status, forgotBook) => {
     if (!batchId) return toastError('Please select a batch first');
     try {
+      // Optimistic update (include fine for consistency)
+      setAttendanceData((prev) => ({
+        ...prev,
+        [studentId]: {
+          status,
+          forgotBook,
+          fine: status === 'Absent' ? 10 : (status === 'Present' && forgotBook ? 5 : 0),
+        },
+      }));
+
+      // Await server response for accuracy
       await api.post('/attendance/mark', {
         date,
         batch: batchId,
@@ -86,16 +103,14 @@ export default function Attendance() {
         forgotBook,
       });
       toastSuccess('Attendance updated');
-      // Optimistic update
-      setAttendanceData((prev) => ({
-        ...prev,
-        [studentId]: { status, forgotBook },
-      }));
       setEditingId(null);
-      // Refresh from server (to get fine, etc.)
-      fetchAttendance();
-    } catch {
+
+      // Refresh from server to sync any changes (e.g., exact fine)
+      await fetchAttendance();
+    } catch (e) {
+      console.error('Frontend mark error:', e); // Added for debugging
       toastError('Failed to update');
+      // Optionally revert optimistic update here if needed, but keeping it prevents UI flicker
     }
   };
 

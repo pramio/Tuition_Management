@@ -23,10 +23,11 @@ r.post('/mark', async (req, res, next) => {
       { date: day, student },
       { $set: { date: day, batch, student, status, forgotBook: !!forgotBook, fine } },
       { new: true, upsert: true, setDefaultsOnInsert: true }
-    );
+    ).populate('student', 'name');
 
     res.json(doc);
   } catch (e) {
+    console.error('Mark attendance error:', e); // Added for debugging
     next(e);
   }
 });
@@ -47,6 +48,7 @@ r.get('/', async (req, res, next) => {
     const list = await Attendance.find(q).sort({ date: -1 });
     res.json(list);
   } catch (e) {
+    console.error('Get student attendance error:', e); // Added for debugging
     next(e);
   }
 });
@@ -69,6 +71,7 @@ r.get('/by-batch', async (req, res, next) => {
 
     res.json(list);
   } catch (e) {
+    console.error('By-batch attendance error:', e); // Added for debugging
     next(e);
   }
 });
